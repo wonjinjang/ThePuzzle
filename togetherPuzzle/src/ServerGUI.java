@@ -23,29 +23,18 @@ public class ServerGUI extends JFrame {
     }
 
     private void buildGUI() {
-        // 로그 표시 영역
         t_log = new JTextArea();
         t_log.setEditable(false);
         JScrollPane scrollPane = new JScrollPane(t_log);
         add(scrollPane, BorderLayout.CENTER);
 
-        // 버튼 패널
         JPanel buttonPanel = new JPanel();
         b_start = new JButton("서버 시작");
         b_stop = new JButton("서버 중지");
         b_stop.setEnabled(false);
 
-        b_start.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                startServer();
-            }
-        });
-
-        b_stop.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                stopServer();
-            }
-        });
+        b_start.addActionListener(e -> startServer());
+        b_stop.addActionListener(e -> stopServer());
 
         buttonPanel.add(b_start);
         buttonPanel.add(b_stop);
@@ -58,7 +47,7 @@ public class ServerGUI extends JFrame {
         b_stop.setEnabled(true);
         new Thread(() -> {
             try {
-                serverSocket = new ServerSocket(12345); // 포트 번호는 필요에 따라 변경 가능
+                serverSocket = new ServerSocket(12345);
                 appendLog("서버가 시작되었습니다.");
 
                 while (isRunning) {
@@ -99,28 +88,42 @@ public class ServerGUI extends JFrame {
 
     private class ClientHandler extends Thread {
         private Socket socket;
-        private DataInputStream in;
         private DataOutputStream out;
-        private String clientName;
+        private DataInputStream in;
+        //private String clientName;
 
         public ClientHandler(Socket socket) {
             this.socket = socket;
             try {
-                in = new DataInputStream(socket.getInputStream());
                 out = new DataOutputStream(socket.getOutputStream());
+                in = new DataInputStream(socket.getInputStream());
             } catch (IOException e) {
                 appendLog("클라이언트 연결 오류: " + e.getMessage());
             }
         }
 
+        private void broadcast(String message) {
+            for (ClientHandler client : clients) {
+                try {
+                    client.out.writeUTF(message);
+                    client.out.flush();
+                } catch (IOException e) {
+                    appendLog("메시지 전송 오류: " + e.getMessage());
+                }
+            }
+        }
+
+        @Override
         public void run() {
             try {
-                // 클라이언트로부터 이름 받기
-                clientName = in.readUTF();
-                appendLog(clientName + "님이 연결되었습니다.");
-
-                // 이후 클라이언트와의 통신 처리 (현재는 없음)
-
+                String message;
+                //clientName = in.readUTF();
+                
+                // 클라이언트로부터 메시지 수신
+                while ((message = in.readUTF()) != null) {
+                    appendLog("클라이언트 메시지: " + message);
+                    broadcast(message); // 다른 클라이언트에 메시지 전송
+                }
             } catch (IOException e) {
                 appendLog("클라이언트 통신 오류: " + e.getMessage());
             } finally {
@@ -133,7 +136,8 @@ public class ServerGUI extends JFrame {
                 if (in != null) in.close();
                 if (out != null) out.close();
                 if (socket != null && !socket.isClosed()) socket.close();
-                clients.remove(this);
+                appendLog("클라이언트 연결이 종료되었습니다.");
+                clients.remove(this); // 클라이언트 목록에서 제거
             } catch (IOException e) {
                 appendLog("연결 종료 오류: " + e.getMessage());
             }

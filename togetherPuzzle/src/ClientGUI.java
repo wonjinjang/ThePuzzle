@@ -1,4 +1,4 @@
-// ClientGUI.java
+// ClientGUI.java 
 
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -6,6 +6,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
 import java.net.*;
+import java.util.concurrent.Executors;
 
 public class ClientGUI extends JFrame {
     private JTextField t_pieceCount;
@@ -165,29 +166,30 @@ public class ClientGUI extends JFrame {
 
                 if (connectToServer()) {
                     cardLayout.show(mainPanel, "game");
+                    startChatReceiver();
                 } else {
                     JOptionPane.showMessageDialog(ClientGUI.this, "서버에 연결할 수 없습니다.");
                 }
             }
         });
 
-        // 전송 버튼 이벤트 (현재는 기능 없음)
+        // 전송 버튼 이벤트
         b_send.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
-                // 채팅 기능은 나중에 구현 예정
-                chatInput.setText("");
+                sendMessage();
             }
         });
     }
 
     private boolean connectToServer() {
         try {
+            // 서버와 연결 생성
             socket = new Socket("localhost", serverPort);
-            out = new DataOutputStream(socket.getOutputStream());
-            in = new DataInputStream(socket.getInputStream());
+            out = new DataOutputStream(socket.getOutputStream()); // DataOutputStream 사용
+            in = new DataInputStream(socket.getInputStream());    // DataInputStream 사용
 
             // 사용자 이름을 서버로 전송
-            out.writeUTF(userName);
+            out.writeUTF(userName+"님이 참가하였습니다.");
             out.flush();
 
             return true;
@@ -197,12 +199,36 @@ public class ClientGUI extends JFrame {
         }
     }
 
+    private void sendMessage() {
+        String message = chatInput.getText().trim();
+        if (message.isEmpty()) return;
+
+        try {
+            out.writeUTF(userName + ": " + message); // 서버로 메시지 전송
+            out.flush();
+            chatInput.setText("");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void startChatReceiver() {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                String message;
+                while ((message = in.readUTF()) != null) {
+                    chatArea.append(message + "\n"); // 채팅창에 메시지 추가
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
     private void selectFile() {
         JFileChooser fileChooser = new JFileChooser();
-        // 데스크톱 디렉토리로 설정
         fileChooser.setCurrentDirectory(new File(System.getProperty("user.home"), "Desktop"));
 
-        // 이미지 파일 필터 추가
         FileNameExtensionFilter filter = new FileNameExtensionFilter(
                 "이미지 파일", "jpg", "png", "gif", "jpeg");
         fileChooser.setFileFilter(filter);
@@ -210,7 +236,6 @@ public class ClientGUI extends JFrame {
         int returnVal = fileChooser.showOpenDialog(this);
         if (returnVal == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
-            // 선택한 이미지를 이미지 라벨에 표시
             ImageIcon imageIcon = new ImageIcon(file.getAbsolutePath());
             Image image = imageIcon.getImage();
             Image scaledImage = image.getScaledInstance(500, 500, Image.SCALE_SMOOTH);
