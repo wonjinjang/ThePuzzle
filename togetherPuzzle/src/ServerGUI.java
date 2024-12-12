@@ -1,10 +1,8 @@
-// ServerGUI.java
-
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.*;
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.Vector;
 
 public class ServerGUI extends JFrame {
@@ -49,19 +47,48 @@ public class ServerGUI extends JFrame {
             try {
                 serverSocket = new ServerSocket(12345);
                 appendLog("서버가 시작되었습니다.");
-
+    
                 while (isRunning) {
                     Socket clientSocket = serverSocket.accept();
-                    ClientHandler handler = new ClientHandler(clientSocket);
-                    clients.add(handler);
+                    String userId;
+    
+                    // 클라이언트 연결 순서에 따라 user1, user2, user3, user4 할당
+                    int clientNumber = clients.size() + 1;
+                    switch (clientNumber) {
+                        case 1:
+                            userId = "user1";
+                            break;
+                        case 2:
+                            userId = "user2";
+                            break;
+                        case 3:
+                            userId = "user3";
+                            break;
+                        case 4:
+                            userId = "user4";
+                            break;
+                        default:
+                            userId = "unknown"; // 4명을 초과할 경우 처리
+                            break;
+                    }
+    
+                    ClientHandler handler = new ClientHandler(clientSocket, userId);
+                    clients.add(handler); // 클라이언트를 목록에 추가
+
+                    // 클라이언트 핸들러 시작
                     handler.start();
+
+                    // 모든 클라이언트에게 사용자 목록 전송
+                    broadcastUserList();
                 }
             } catch (IOException e) {
-                appendLog("서버 오류: " + e.getMessage());
+                if (isRunning) {
+                    appendLog("서버 오류: " + e.getMessage());
+                }
             }
         }).start();
     }
-
+    
     private void stopServer() {
         isRunning = false;
         b_start.setEnabled(true);
@@ -86,29 +113,69 @@ public class ServerGUI extends JFrame {
         });
     }
 
+    private void broadcast(String message) {
+        synchronized (clients) {
+            for (ClientHandler client : clients) {
+                try {
+                    client.writer.write(message + "\n");
+                    client.writer.flush();
+                } catch (IOException e) {
+                    appendLog("메시지 전송 오류: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private void broadcastUserList() {
+        synchronized (clients) {
+            StringBuilder userList = new StringBuilder("USER_LIST::");
+            for (ClientHandler client : clients) {
+                userList.append(client.userId).append(",");
+            }
+            // 마지막 콤마 제거
+            if (userList.length() > 11) {
+                userList.setLength(userList.length() - 1);
+            }
+            broadcast(userList.toString());
+        }
+    }
+
     private class ClientHandler extends Thread {
         private Socket socket;
-        private DataOutputStream out;
-        private DataInputStream in;
-        //private String clientName;
+        private BufferedReader reader;
+        private BufferedWriter writer;
+        private String userId;
 
-        public ClientHandler(Socket socket) {
+        public ClientHandler(Socket socket, String userId) {
             this.socket = socket;
+            this.userId = userId;
             try {
-                out = new DataOutputStream(socket.getOutputStream());
-                in = new DataInputStream(socket.getInputStream());
+                reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
+                appendLog(userId + " 연결됨");
+
+                // 새로운 클라이언트에게 현재 사용자 목록 전송
+                sendCurrentUserList();
             } catch (IOException e) {
                 appendLog("클라이언트 연결 오류: " + e.getMessage());
             }
         }
 
-        private void broadcast(String message) {
-            for (ClientHandler client : clients) {
+        private void sendCurrentUserList() {
+            synchronized (clients) {
+                StringBuilder userList = new StringBuilder("USER_LIST::");
+                for (ClientHandler client : clients) {
+                    userList.append(client.userId).append(",");
+                }
+                // 마지막 콤마 제거
+                if (userList.length() > 11) {
+                    userList.setLength(userList.length() - 1);
+                }
                 try {
-                    client.out.writeUTF(message);
-                    client.out.flush();
+                    writer.write(userList.toString() + "\n");
+                    writer.flush();
                 } catch (IOException e) {
-                    appendLog("메시지 전송 오류: " + e.getMessage());
+                    appendLog("사용자 목록 전송 오류: " + e.getMessage());
                 }
             }
         }
@@ -117,15 +184,12 @@ public class ServerGUI extends JFrame {
         public void run() {
             try {
                 String message;
-                //clientName = in.readUTF();
-                
-                // 클라이언트로부터 메시지 수신
-                while ((message = in.readUTF()) != null) {
-                    appendLog("클라이언트 메시지: " + message);
-                    broadcast(message); // 다른 클라이언트에 메시지 전송
+                while ((message = reader.readLine()) != null) {
+                    appendLog(userId + " 메시지: " + message);
+                    broadcast(String.format("%s::%s", userId, message));
                 }
             } catch (IOException e) {
-                appendLog("클라이언트 통신 오류: " + e.getMessage());
+                appendLog(userId + " 통신 오류: " + e.getMessage());
             } finally {
                 closeConnection();
             }
@@ -133,18 +197,22 @@ public class ServerGUI extends JFrame {
 
         public void closeConnection() {
             try {
-                if (in != null) in.close();
-                if (out != null) out.close();
+                if (reader != null) reader.close();
+                if (writer != null) writer.close();
                 if (socket != null && !socket.isClosed()) socket.close();
-                appendLog("클라이언트 연결이 종료되었습니다.");
-                clients.remove(this); // 클라이언트 목록에서 제거
             } catch (IOException e) {
                 appendLog("연결 종료 오류: " + e.getMessage());
+            } finally {
+                synchronized (clients) {
+                    clients.remove(this);
+                    broadcastUserList(); // 클라이언트 연결 종료 시 사용자 목록 업데이트
+                }
+                appendLog(userId + " 연결 종료");
             }
         }
     }
 
     public static void main(String[] args) {
-        new ServerGUI();
-    }
+        new ServerGUI(); 
+    }    
 }
